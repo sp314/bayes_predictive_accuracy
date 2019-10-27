@@ -1,0 +1,228 @@
+---
+title: "Bayesian Predictive Accuracy"
+geometry: margin=0cm
+output:
+  html_document:
+    theme: paper
+    toc: true
+    toc_float: true
+    highlight: kate
+    df_print: paged
+---
+```{css phan_knitr_style, echo=FALSE}
+.tocify-item {
+  text-indent: 0px;
+}
+
+.tocify {
+  margin: 5px 10px;
+  font-size: 1.7rem;
+}
+
+body {
+  font-size: 14px;
+}
+
+.list-group-item.active, .list-group-item.active:hover, .list-group-item.active:focus {
+  font-style: oblique;
+  color: #154067;
+  background-color: #ffffff;
+}
+
+.main-container {
+  margin-left: 0px;
+  margin-right: 0px;
+}
+```
+
+```{r setup, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(LaplacesDemon) # Too lazy to implement my own continuous mode approximation function
+```
+
+# Simulation: Normal posteriors
+
+\[y | \theta \sim N(\theta, 1)\]
+
+One observed value = 4
+
+```{r}
+y <- 4
+```
+
+\[\hat{\theta}_1 \sim N(0, 1), \qquad \hat{\theta}_2 \sim N(10, 3), \qquad \hat{\theta}_3 \sim N(10, 6) \]
+
+I might be wrong, but since we have the posteriors for $\theta$, we would have to translate this into a predictive distribution for $y$. It won't change much but I think this is how they defined it in Gelman.
+
+```{r}
+set.seed(30071999)
+theta_1 <- rnorm(10000, mean = 0, sd = 1)
+theta_2 <- rnorm(10000, mean = 10, sd = 3)
+theta_3 <- rnorm(10000, mean = 10, sd = 6)
+
+pred_1 <- rnorm(10000, mean = theta_1, sd = 1)
+pred_2 <- rnorm(10000, mean = theta_2, sd = 1)
+pred_3 <- rnorm(10000, mean = theta_3, sd = 1)
+```
+
+```{r}
+distributions <- data.frame(theta = c(theta_1,theta_2,theta_3), model = rep(c("1","2","3"), each = 10000),
+                            y_pred = c(pred_1,pred_2,pred_3))
+
+# Plot posterior distributions for \theta ~ N(?, ?)
+distributions %>%
+  ggplot() + 
+  geom_density(mapping = aes(x = theta, fill = model), alpha = 0.5) + 
+  geom_vline(xintercept = 4, color = "red")
+
+# Plot predictive distributions for y ~ N(\theta, 1)
+distributions %>%
+  ggplot() + 
+  geom_density(mapping = aes(x = y_pred, fill = model), alpha = 0.5) + 
+  geom_vline(xintercept = 4, color = "red")
+```
+
+
+## Mean squared error & weighted mean squared error
+
+Unweighted MSE makes model 1 look best.
+
+Son:
+My interpretation of this is that we choose posterior mean as our estimator and do squared error with the observation(s). In this case wouldn't it mean that variance has no factor in this as long as the center is the same? $\text{MSE}(\hat{y}_1)$ and $\text{MSE}(\hat{y}_2)$ are practically the same and the only difference is likely sampling error. MSE will only measure the bias of the posterior mean estimator with no consideration of variance. Since $E[\hat{\theta}_1]$ is the closest to $4$, it is the best when rating MSE.
+
+```{r}
+# MSE for models 1, 2, & 3
+(y - mean(pred_1))^2
+(y - mean(pred_2))^2
+(y - mean(pred_3))^2
+```
+
+Weighted MSE makes model 3 look best
+
+Son:
+We're looking at a posterior mean estimator and the squared number of standard deviations the observation is away. Thinking about it for a bit, the "best" rated model can completely disregard any form of bias as long as it keeps variance high. For example:
+
+\[\hat{y}_4 \sim N(100, 100^2)\]
+
+```{r}
+# Weighted MSE for models 1, 2, & 3
+(y - mean(pred_1))^2 / var(pred_1)
+(y - mean(pred_2))^2 / var(pred_2)
+(y - mean(pred_3))^2 / var(pred_3)
+
+# Model that disregards bias in posterior estimator is vague
+theta_4 <- rnorm(10000, mean = 100, sd = 100)
+pred_4 <- rnorm(10000, mean = theta_4, sd = 1)
+(y - mean(pred_4))^2 / var(pred_4)
+```
+
+## Ala gelman?  
+
+Calculate $p(y|\theta)$ at each $\theta$ in simulation. I don't have $p(y|\theta)$. Predictive distribution of $y$ drawn from $p(y|\theta)$ from fake $p(\theta)$.
+
+Son:
+I interpret LPD in section 2.3 of Gelman as simply a model's fit with future data. I measure these below for all 3 of our models. I was a little confused but I think this is because we assume a posterior mean as our prediction in this section. I don't think you have to make up $\theta$ as we have 3 models for it already. The tricky part is (1) where the true distribution of future data must be known to determine the ELPD from our model, this seems all theoretical however. We can't quite find ELPD it seems because we can't know what the true $\tilde{y}$ but this would kinda be the expected fit of a model to new data.
+
+Model 3 also seems to do the best when I translate it to just a log predictive density at the point $y = 4$. This makes sense since model 3 has the most density at that point. My intuition for this measure is that we simply want to make sure our observations land within some dense zone as you explained before.
+
+```{r}
+# draw theta
+theta <- rnorm(n = 1000, mean = 0, sd = 1)
+
+# like plot on p20 of gelman
+hist(log(dnorm(y, mean = theta, sd = 1)))
+
+# log predictive density
+# log the posterior mean | density of the future y observation distribution | this depends on \theta as the RV
+log(mean(dnorm(x = y, mean = theta_1, sd = 1))) # model 1
+log(mean(dnorm(x = y, mean = theta_2, sd = 1))) # model 2
+log(mean(dnorm(x = y, mean = theta_3, sd = 1))) # model 3
+```
+
+## Using median absolute deviation?!?
+
+https://en.wikipedia.org/wiki/Median_absolute_deviation
+
+(y - posterior median) / MAD
+
+NOTE: When squared, I think this is similar to the weighted mse
+
+Son:
+So we're looking at the number of mean absolute deviations our observed $y$ is away from the median of $\hat{y}_n$. This makes sense to me! I always thought about how much information you could get from data by looking at just a mean and a median. I also removed the 'abs()' after squaring and also normalized $MAD$ to $1$. So would this be considered a weighted absolute/squared deviation from the median? Clearly this only parallels very well with the mean measures in a mean = median case.
+
+```{r}
+# R scales the MAD.  Use constant = 1 to get raw
+mad(c(1,2,3))
+mad(c(1,2,3), constant = 1)
+```
+
+
+Model 3 is best by this measure
+
+```{r}
+# Comparing to median
+abs(y - median(pred_1)) / mad(pred_1, constant = 1)
+abs(y - median(pred_2)) / mad(pred_2, constant = 1)
+abs(y - median(pred_3)) / mad(pred_3, constant = 1)
+
+# Squared = similar to weighted MSE
+((y - median(pred_1)) / mad(pred_1, constant = 1))^2
+((y - median(pred_2)) / mad(pred_2, constant = 1))^2
+((y - median(pred_3)) / mad(pred_3, constant = 1))^2
+```
+
+## DIC (maybe not right)
+
+the smaller the DIC the better
+
+
+Model 1 is best by DIC.  Perhaps because of the assumption that the data are generated by N(theta, 1). 
+
+Son:
+I might be wrong here but we would be choosing $\hat{\theta}_{\text{Bayes}}$ resulting in one of our predictive distributions $y | \hat{\theta}_{\text{Bayes}} \sim N(\hat{\theta}_{\text{Bayes}}, 1)$. This log density under our chosen \hat{\theta}_{\text{Bayes}} would then be compared to all other possible $\theta$ choices within out model to create the effective number of parameters $p_{\text{DIC}}$. I think DIC might be flexible in that we can choose different $\hat{\theta}_{\text{Bayes}}$ and compare it to other possible $\hat{\theta}$ within our model (mean, median, mode etc.). I also wanted to try out DIC for each of these other posterior $\hat{\theta}_{\text{Bayes}}$ rules, but this will not vary at all since mean = median within normal. I also couldn't access the Kyle Hardman site.
+
+TO DO: TRY WITH asymmetric and multimodal distributions!!!!!
+
+```{r}
+# RETURN: DIC measure for some future data and posterior predictive distribution based on theta model and prediction rule
+# y: future data
+# theta_model: posterior theta we choose based on past y
+# bayes_predict: rule to choose theta_hat_bayesian from our posterior theta. Posterior mean by default
+# WARNING: We assume a predictive function y|theta ~ N(theta, 1); can further generalize
+
+dic_fncn <- function(y, theta_model, bayes_predict = mean) {
+    theta_bayes = bayes_predict(theta_model)
+    
+    pdic <- 2 * ( dnorm(y, mean = theta_bayes, sd = 1, log = TRUE) - mean(dnorm(y, mean = theta_model, sd = 1, log = TRUE)) )
+    -2*dnorm(4, mean = theta_bayes, sd = 1, log = TRUE) + 2*pdic
+}
+
+dic_fncn(4, theta_model = theta_1, bayes_predict = mean)
+dic_fncn(4, theta_model = theta_2, bayes_predict = mean)
+dic_fncn(4, theta_model = theta_3, bayes_predict = mean)
+
+dic_fncn(4, theta_model = theta_1, bayes_predict = median)
+dic_fncn(4, theta_model = theta_2, bayes_predict = median)
+dic_fncn(4, theta_model = theta_3, bayes_predict = median)
+
+dic_fncn(4, theta_model = theta_1, bayes_predict = Mode)
+dic_fncn(4, theta_model = theta_2, bayes_predict = Mode)
+dic_fncn(4, theta_model = theta_3, bayes_predict = Mode)
+```
+
+##WAIC 
+
+```{r}
+# This is consistent with http://kylehardman.com/BlogPosts/View/6
+pred <- pred_1
+L = log(dnorm(4,mean(pred)))
+S = length(pred)
+llSum = 0
+for (s in 1:S) {
+theta_s = pred[s]
+llSum = llSum + log(dnorm(4,theta_s))
+}
+P = 2 * (L - (1 / S * llSum))
+DIC = -2 * (L - P)
+```
+
