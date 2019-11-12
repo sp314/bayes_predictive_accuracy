@@ -275,7 +275,7 @@ P = 2 * (L - (1 / S * llSum))
 DIC = -2 * (L - P)
 ```
 
-# Simulation: Tailed Distributions
+# Simulation: Asymmetric Distributions
 
 I consider 3 Gamma posterior predictive distributions:
 
